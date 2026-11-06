@@ -89,10 +89,14 @@ def record(repo: Path, output: Path, keep: Optional[Path], jobs: int) -> int:
 
     counts = {name: count for name, count, _ in results if count is not None}
     failures = [(name, message) for name, count, message in results if count is None]
+    # A table missing cases would read as those cases being gone, so it is not kept.
+    if failures:
+        for name, message in failures:
+            print(f"FAIL {name}: {message.splitlines()[-1] if message else 'no output'}")
+        print(f"{len(failures)} of {len(results)} cases failed; {output} is unchanged")
+        return 1
     table = {"format": 1, "total": sum(counts.values()), "cases": dict(sorted(counts.items()))}
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(json.dumps(table, indent=1) + "\n", encoding="utf-8")
     print(f"{len(counts)} cases, {table['total']} instructions -> {output}")
-    for name, message in failures:
-        print(f"FAIL {name}: {message.splitlines()[-1] if message else 'no output'}")
-    return 1 if failures else 0
+    return 0

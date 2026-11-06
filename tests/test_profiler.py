@@ -9,7 +9,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from myprofiler import compare, session  # noqa: E402
+from myprofiler import bench, cli, compare, runs, session  # noqa: E402
 from myprofiler.bench import read_cases  # noqa: E402
 from myprofiler.images import Image, ImageSet, short_name  # noqa: E402
 from myprofiler.profile import Profile  # noqa: E402
@@ -164,6 +164,19 @@ class Tables(unittest.TestCase):
             after.write_text(json.dumps({"cases": {"a": 12, "b": 9}}))
             self.assertEqual(compare.compare_tables(before, after, 5), 1)
 
+    def test_a_failed_case_leaves_the_table_alone(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            repo = Path(temporary)
+            compiler = repo / "toolchain" / "MyLangCompiler"
+            (compiler / "tests").mkdir(parents=True)
+            (compiler / "tests" / "e2e.cases").write_text("a|1|x.mln\n")
+            (compiler / "mlc").write_text("#!/bin/sh\nexit 1\n")
+            (compiler / "mlc").chmod(0o755)
+            table = repo / "baseline.json"
+            table.write_text("kept")
+            self.assertEqual(bench.record(repo, table, None, 1), 1)
+            self.assertEqual(table.read_text(), "kept")
+
     def test_cases_are_read_with_their_flags(self):
         with tempfile.TemporaryDirectory() as temporary:
             manifest = Path(temporary) / "e2e.cases"
@@ -172,6 +185,50 @@ class Tables(unittest.TestCase):
         self.assertEqual([case.name for case in cases], ["a", "b"])
         self.assertEqual(cases[0].sources, ["x.mln", "y.mln"])
         self.assertEqual(cases[1].flags, ["--error-trace"])
+
+
+class Runs(unittest.TestCase):
+    def setUp(self):
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        self.build = Path(temporary.name)
+        (self.build / "user").mkdir()
+
+    def record(self, text: str) -> Path:
+        write_image(self.build, "kernel_linked")
+        (self.build / "kernel_linked.mbin.map").write_text(MAP.replace("Text__len", text))
+        write_image(self.build / "user", "hello")
+        runs.start(self.build).write_text(text)
+        return runs.finish(self.build)
+
+    def test_a_new_run_moves_the_last_one_back(self):
+        self.record("first")
+        last = self.record("second")
+        self.assertEqual(last.read_text(), "second")
+        self.assertEqual(runs.profile_of(self.build, "previous").read_text(), "first")
+        self.assertFalse((self.build / "profile" / "next").exists())
+
+    def test_a_run_reads_the_images_it_ran_not_the_current_build(self):
+        self.record("first")
+        self.record("second")
+        previous = runs.profile_of(self.build, "previous")
+        directory = runs.image_directory(previous, self.build)
+        self.assertEqual(directory, previous.parent)
+        self.assertEqual(Image(directory / "kernel_linked.mbin").function(0x20008), "first")
+        self.assertTrue((directory / "user" / "hello.mbin").exists())
+
+    def test_a_loose_profile_reads_the_build(self):
+        self.assertEqual(runs.image_directory(self.build / "x" / "p.json", self.build), self.build)
+
+    def test_an_unfinished_run_does_not_replace_the_last(self):
+        last = self.record("first")
+        runs.start(self.build).write_text("interrupted")
+        self.assertEqual(last.read_text(), "first")
+
+    def test_a_missing_profile_says_how_to_get_one(self):
+        with self.assertRaises(SystemExit) as caught:
+            cli.main(["report", "--build", str(self.build)])
+        self.assertIn("make profile", str(caught.exception))
 
 
 class Session(unittest.TestCase):

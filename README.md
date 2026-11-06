@@ -22,22 +22,45 @@ MyProfiler only reads. The measuring lives where the facts are:
 
 ## Commands
 
-Run these from the MyComputer root after `make build`.
+Run these from the MyComputer root. They rebuild what they measure.
 
 ```bash
-# Boot the system under the profiler, then read the result
-python3 tools/MyProfiler/myprofiler.py system boot.json --steps 100000000
-python3 tools/MyProfiler/myprofiler.py report boot.json
+# Profile the boot and report on it
+make profile
+make profile TOP=40
 
-# One source file, with the instructions each line retired
-python3 tools/MyProfiler/myprofiler.py annotate boot.json fs/fs.unsafe.mln
+# One source file from that profile, with the instructions each line retired
+make profile SOURCE=fs/fs.unsafe.mln
 
-# What changed between two profiles, by function
-python3 tools/MyProfiler/myprofiler.py diff before.json after.json
+# What changed between the last two boots, by function
+make profile-diff
 
-# The instruction table of the compiler's e2e programs
-python3 tools/MyProfiler/myprofiler.py bench after.json
-python3 tools/MyProfiler/myprofiler.py bench-diff qa/baselines/e2e-instructions.json after.json
+# The compiler's e2e programs against the baseline, and accepting a new one
+make bench
+make bench-save
+```
+
+`build/profile` holds the results: `last` and `previous` are the last two boots,
+each with a copy of the images it ran, and `bench.json` is the last e2e table.
+A profile holds addresses and the next build moves them, so reading `previous`
+through the current build would name the wrong functions. Copy a run elsewhere
+under `build/profile` to keep it longer.
+
+`make profile` measures the boot up to the first time the CPU waits for an
+interrupt, about 35 million instructions, all in the kernel. To measure a user
+program, see [Measuring one interaction](#measuring-one-interaction).
+
+Where the timer lands changes the boot slightly: two runs of one build have
+differed by 1.4%. `make profile-diff` shows that difference too, so use
+`make bench` for small changes.
+
+`myprofiler.py` takes the same defaults, and paths when you want others:
+
+```bash
+python3 tools/MyProfiler/myprofiler.py report --top 40
+python3 tools/MyProfiler/myprofiler.py annotate mm/mmu.unsafe.mln build/profile/previous/profile.json
+python3 tools/MyProfiler/myprofiler.py diff build/profile/keep/profile.json
+python3 tools/MyProfiler/myprofiler.py bench-diff --fail-on-regression
 ```
 
 For a single program, profile it with `myemu -i app.mbin --headless --profile
