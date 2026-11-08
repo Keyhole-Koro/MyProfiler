@@ -10,6 +10,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
 
+from .mylinker import objformat
+
 TEXT_RANGE = re.compile(r"# text: 0x([0-9a-fA-F]+) \.\. 0x([0-9a-fA-F]+)")
 MANGLED = re.compile(r"__mlg_[sf]_(\d+)_")
 
@@ -76,7 +78,7 @@ class Image:
             value = int(address, 16)
             # A tagged name is a referenced block label, which is inside a
             # function; `.lines` names the private functions.
-            if self.contains(value) and "-[" not in name:
+            if self.contains(value) and objformat.PRIVATE_LABEL_MARK not in name:
                 functions[value] = short_name(name)
         return functions
 

@@ -3,6 +3,8 @@
 from pathlib import Path
 from typing import Optional
 
+from .mylinker import objformat
+
 THREAD_SYMBOL = "g_current_thread_slot"
 
 
@@ -13,7 +15,7 @@ def thread_variable(build_dir: Path) -> Optional[int]:
         return None
     for line in symbol_map.read_text(encoding="utf-8").splitlines():
         address, _, name = line.partition(" ")
-        if name == THREAD_SYMBOL or name.startswith(THREAD_SYMBOL + "-["):
+        if name == THREAD_SYMBOL or name.startswith(THREAD_SYMBOL + objformat.PRIVATE_LABEL_MARK):
             return int(address, 16)
     return None
 
