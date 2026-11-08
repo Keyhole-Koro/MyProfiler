@@ -15,7 +15,7 @@ ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(ROOT / "tools" / "MyProfiler"))
 sys.path.insert(0, str(ROOT / "system" / "MyOS" / "tests"))
 
-from mydomtester import MyOS  # noqa: E402
+from mydomtester import MyOS, expect  # noqa: E402
 from myprofiler import session  # noqa: E402
 from myprofiler.profile import Profile, find_images  # noqa: E402
 
@@ -38,9 +38,15 @@ def main() -> int:
         output = directory / "session.json"
         with MyOS.launch(build / "firmware_linked.mbin", disk=disk,
                          extra_args=session.emulator_arguments(build, output)) as os:
-            os._request("profile.reset", {})
             terminal_in = os.get_by_test_id("terminal-input")
             terminal_out = os.get_by_test_id("terminal-output")
+            # Boot's windows arrive in any order and each lands on top, so
+            # wait for them and bring the terminal back to the front.
+            expect(terminal_in).to_be_visible()
+            expect(os.get_by_role("window", name="Counter")).to_be_visible()
+            expect(os.get_by_role("window", name="Notes")).to_be_visible()
+            os.raise_window("Terminal")
+            os._request("profile.reset", {})
             terminal_in.click()
             os._type("hello")
             os._press("enter")
