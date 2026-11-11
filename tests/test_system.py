@@ -38,19 +38,19 @@ def main() -> int:
         output = directory / "session.json"
         with MyOS.launch(build / "firmware_linked.mbin", disk=disk,
                          extra_args=session.emulator_arguments(build, output)) as os:
-            terminal_in = os.get_by_test_id("terminal-input")
-            terminal_out = os.get_by_test_id("terminal-output")
+            terminal = os.get_by_test_id("terminal")
             # Boot's windows arrive in any order and each lands on top, so
-            # wait for them and bring the terminal back to the front.
-            expect(terminal_in).to_be_visible()
-            expect(os.get_by_role("window", name="Counter")).to_be_visible()
+            # wait for them and bring the terminal back to the front, once
+            # its shell is ready.
+            expect(terminal).to_be_visible()
             expect(os.get_by_role("window", name="Notes")).to_be_visible()
+            wait_for(terminal, "$ ")
             os.raise_window("Terminal")
             os._request("profile.reset", {})
-            terminal_in.click()
+            terminal.click()
             os._type("hello")
             os._press("enter")
-            wait_for(terminal_out, "exited with 7")
+            wait_for(terminal, "exited with 7")
             os._request("profile.write", {"path": str(output)})
 
         system, users = find_images(build)
