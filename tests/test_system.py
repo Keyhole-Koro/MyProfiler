@@ -43,7 +43,7 @@ def main() -> int:
             # wait for them and bring the terminal back to the front, once
             # its shell is ready.
             expect(terminal).to_be_visible()
-            expect(os.get_by_role("window", name="Notes")).to_be_visible()
+            expect(os.get_by_role("window", name="Editor")).to_be_visible()
             wait_for(terminal, "$ ")
             os.raise_window("Terminal")
             os._request("profile.reset", {})
