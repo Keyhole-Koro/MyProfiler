@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """MyProfiler's reading of maps, line tables, profiles and benchmark tables."""
 
+import contextlib
+import io
 import json
 import sys
 import tempfile
@@ -9,7 +11,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from myprofiler import bench, cli, compare, runs, session, trace  # noqa: E402
+from myprofiler import bench, cli, compare, report, runs, session, trace  # noqa: E402
 from myprofiler.bench import read_cases  # noqa: E402
 from myprofiler.images import Image, ImageSet, short_name  # noqa: E402
 from myprofiler.profile import Profile  # noqa: E402
@@ -160,6 +162,34 @@ class Profiles(unittest.TestCase):
         path.write_text(json.dumps({"total_instructions": 1}))
         with self.assertRaises(ValueError):
             Profile(path, self.system, [])
+
+
+class Reports(unittest.TestCase):
+    def setUp(self):
+        self.temporary = tempfile.TemporaryDirectory()
+        self.directory = Path(self.temporary.name)
+        self.addCleanup(self.temporary.cleanup)
+
+    def load(self, source: Path, hits: list, **fields) -> Profile:
+        image = write_image(self.directory, "app")
+        (self.directory / "app.mbin.lines").write_text(LINES.replace("/src/app.mln", str(source)))
+        spaces = [{"space": 0x7000, "instructions": sum(row["hits"] for row in hits),
+                   "text_sample": TEXT.hex()}]
+        path = write_profile(self.directory, "p.json", hits, spaces=spaces, **fields)
+        return Profile(path, ImageSet([], "kernel"), [Image(image)])
+
+    def printed(self, function, *args):
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            result = function(*args)
+        return result, out.getvalue()
+
+    def test_a_source_that_is_gone_is_reported_not_raised(self):
+        gone = self.directory / "moved" / "app.mln"
+        profile = self.load(gone, [{"space": 0x7000, "pc": 0x20000, "hits": 2}])
+        result, out = self.printed(report.annotate, profile, "app.mln")
+        self.assertEqual(result, 1)
+        self.assertIn(str(gone), out)
 
 
 class Tables(unittest.TestCase):
