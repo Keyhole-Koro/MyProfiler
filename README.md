@@ -16,7 +16,7 @@ MyProfiler only reads. The measuring lives where the facts are:
 | `.func`, `.loc` and `.cost` directives (`mlc --line-info`) | MyLangCompiler |
 | The object's debug trailer | MyAssembler |
 | `.map` and `.lines` next to an image | MyLinker |
-| The profile JSON, `profile.reset` and `profile.write` | MyEmulator |
+| The profile and trace JSON, `profile.*` and `trace.*` | MyEmulator |
 
 [docs/formats.md](docs/formats.md) describes the files between them.
 
@@ -79,6 +79,25 @@ with MyOS.launch(firmware, disk=disk, extra_args=args) as os:
     ...                                    # the interaction to measure
     os._request("profile.write", {"path": str(output)})
 ```
+
+## Recording the order of calls
+
+A profile counts; a trace keeps the order. `trace` boots the system, focuses
+the Editor, types one character and logs every call to the functions in
+`myprofiler/trace.py`'s `WATCH` until the Editor is idle again, with the
+interrupts and thread switches in between:
+
+```bash
+make build
+python3 tools/MyProfiler/myprofiler.py trace                # writes build/profile/trace.json
+python3 tools/MyProfiler/myprofiler.py trace --raw raw.json  # also keep the emulator's own log
+python3 tools/MyProfiler/myprofiler.py trace --convert raw.json --out trace.json
+```
+
+It prints the sequence too, one line per function entered, repeats folded.
+`make atlas-trace` records the one the document map plays back. The emulator's
+`trace.start`, `trace.read`, `trace.write` and `trace.stop` do the logging; see
+[docs/formats.md](docs/formats.md).
 
 ## Limits
 

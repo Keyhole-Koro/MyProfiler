@@ -7,7 +7,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from . import bench, compare, report, runs, session
+from . import bench, compare, report, runs, session, trace
 from .images import Image, ImageSet
 from .profile import Profile, find_images
 
@@ -84,6 +84,9 @@ def parser() -> argparse.ArgumentParser:
                       help="stop here if the boot has not gone idle by then")
     boot.add_argument("--build", type=Path, default=REPO_ROOT / "build")
 
+    follow = commands.add_parser("trace", help="record the calls one UI request makes, in order")
+    trace.add_arguments(follow)
+
     measure = commands.add_parser("bench", help="record the e2e instruction table")
     measure.add_argument("output", type=Path, nargs="?", default=BENCH_TABLE,
                          help="default: build/profile/bench.json")
@@ -116,6 +119,8 @@ def main(argv=None) -> int:
         compare.compare_profiles(load(before, args), load(args.after or last(args), args), args.top)
     elif args.command == "system":
         return run_system(args)
+    elif args.command == "trace":
+        return trace.main(args)
     elif args.command == "bench":
         return bench.record(REPO_ROOT, args.output, args.keep, args.jobs)
     elif args.command == "bench-diff":

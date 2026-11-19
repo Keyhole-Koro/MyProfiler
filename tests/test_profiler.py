@@ -9,7 +9,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from myprofiler import bench, cli, compare, runs, session  # noqa: E402
+from myprofiler import bench, cli, compare, runs, session, trace  # noqa: E402
 from myprofiler.bench import read_cases  # noqa: E402
 from myprofiler.images import Image, ImageSet, short_name  # noqa: E402
 from myprofiler.profile import Profile  # noqa: E402
@@ -239,6 +239,25 @@ class Session(unittest.TestCase):
                 "0x00100000 __START__\n0x001D7E14 g_current_thread_slot-[thread:800]\n")
             arguments = session.emulator_arguments(directory, directory / "o.json")
         self.assertEqual(arguments[2:], ["--profile-thread-var", "0x1d7e14"])
+
+
+
+class TraceTest(unittest.TestCase):
+    def test_names_read_as_the_source_writes_them(self):
+        self.assertEqual(trace.source_name("request_channel_submit", "request_channel"), "request_channel.submit")
+        self.assertEqual(trace.source_name("handle", "os_call_router"), "os_call_router.handle")
+        self.assertEqual(trace.source_name("Editor__edited", "editor"), "Editor.edited")
+        self.assertEqual(trace.source_name("os_call", None), "os_call")
+
+    def test_interrupt_causes_by_bit(self):
+        self.assertEqual(trace.cause_names(0b10001), ["timer", "syscall"])
+        self.assertEqual(trace.cause_names(0), ["0x0"])
+
+    def test_contract_enum_values(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "services.contract.mln"
+            path.write_text("export enum OsService {\n    NONE,\n    REQUEST, // apps\n    LOG = 20,\n    MORE\n}\n")
+            self.assertEqual(trace.contract_enum(path, "OsService"), {0: "NONE", 1: "REQUEST", 20: "LOG", 21: "MORE"})
 
 
 if __name__ == "__main__":

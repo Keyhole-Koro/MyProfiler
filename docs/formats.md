@@ -82,6 +82,40 @@ page, which a reader matches against the built images.
 `inclusive` counts instructions of the same thread only, and counts a recursive
 function once.
 
+## Trace: `myemu` `trace.write`
+
+The emulator's own log of one stretch of a run, which `trace` reads. JSON with
+`"format": 1`:
+
+| Key | Holds |
+|---|---|
+| `started` | `retired` and `clock` when `trace.start` came |
+| `events` | `kind` (`enter`, `exit`, `irq`, `iret`, `switch`, `request`), `retired`, `clock`, `thread`, `space`, and by kind `pc`, `cause`, `trap`, `syscall`, `arg`, `from`, `method`, `unwound` |
+| `stacks` | each thread's call stack when the trace started: `thread` and `frames` of `space`, `pc`, `return` |
+| `spaces` | `space`, `text_base`, `text_sample`, to tell a process by its text |
+| `truncated` | whether the log hit its `limit` |
+
+`clock` is the timer clock: ticks << 8 plus 1/256ths of the current tick.
+
+## Trace: `trace`
+
+What `trace` writes from that log, with every address named. JSON with
+`"format": 1`. The document map (MyAtlas) plays these back over its flows.
+
+| Key | Holds |
+|---|---|
+| `title`, `date` | what the run was and when |
+| `build` | each image's build stamp and time, and each repository's commit |
+| `run` | what the driver did and saw, as `before` and `after` |
+| `watched` | the functions logged: `fn`, `program`, `symbol`, `pc`, `file` |
+| `threads` | a label for each thread number |
+| `fields` | what each event key means |
+| `events` | one per line: `seq`, `clock`, `thread`, `program`, `fn`, `ev`, `instr`, and by `ev` `cause`, `trap`, `syscall`, `service`, `interrupted`, `from`, `method`, `unwound` |
+
+`fn` is the function as the source names it: `namespace.function` for a
+function in a file with a namespace, `Type.method` for a method, the label for
+assembly. `instr` counts instructions from the start of the trace.
+
 ## Benchmark table: `bench`
 
 ```json
