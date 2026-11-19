@@ -393,5 +393,98 @@ class TraceTest(unittest.TestCase):
             self.assertEqual(trace.contract_enum(path, "OsService"), {0: "NONE", 1: "REQUEST", 20: "LOG", 21: "MORE"})
 
 
+PROGRAM_TEXT = bytes(range(128))
+
+
+def write_program(directory: Path, name: str, text: bytes = PROGRAM_TEXT) -> Path:
+    """An image laid out as `trace.Program` reads it: entry, text offset and
+    text size at bytes 8, 12 and 16, then a map and a line table."""
+    image = directory / f"{name}.mbin"
+    header = b"MBIN" + bytes(4) + (0x20000).to_bytes(4, "big") + (32).to_bytes(4, "big")
+    header += len(text).to_bytes(4, "big")
+    image.write_bytes(header.ljust(32, b"\0") + text)
+    (directory / f"{name}.mbin.map").write_text(
+        f"# text: 0x20000 .. 0x{0x20000 + len(text):05X}\n"
+        "0x00020000 __START__\n0x00020040 isr_entry\n0x00020050 b_L_end_1-[app:3]\n")
+    (directory / f"{name}.mbin.lines").write_text(
+        f"file 0 {directory / name}.mln\n"
+        "func 0x00020010 0 Editor__edited\nfunc 0x00020020 0 helper\nfunc 0x00020030 0 helper\n"
+        "line 0x00020010 0 3 -\n")
+    return image
+
+
+class TracePrograms(unittest.TestCase):
+    def setUp(self):
+        self.temporary = tempfile.TemporaryDirectory()
+        self.directory = Path(self.temporary.name)
+        self.addCleanup(self.temporary.cleanup)
+        self.program = trace.Program("app", [write_program(self.directory, "app")])
+
+    def test_a_pc_belongs_to_the_function_before_it_within_the_text(self):
+        names = {pc: self.program.function_at(pc) for pc in (0x20000, 0x20014, 0x20044, 0x20054)}
+        self.assertEqual({pc: f.name for pc, f in names.items()},
+                         {0x20000: "__START__", 0x20014: "Editor.edited",
+                          0x20044: "isr_entry", 0x20054: "isr_entry"})  # a private label does not split it
+        self.assertEqual(names[0x20044].file, "")  # an assembly label has no source
+        self.assertIsNone(self.program.function_at(0x20080))
+        self.assertIsNone(self.program.function_at(0x1FFFC))
+
+    def test_a_name_is_found_only_when_it_names_one_function(self):
+        self.assertEqual(self.program.find("Editor.edited").pc, 0x20010)
+        with self.assertRaises(SystemExit) as caught:
+            self.program.find("helper")
+        self.assertIn("names 2 functions", str(caught.exception))
+        with self.assertRaises(SystemExit) as caught:
+            self.program.find("helpr")
+        self.assertIn("close: helper", str(caught.exception))
+        with self.assertRaises(SystemExit) as caught:
+            self.program.find("zzz")
+        self.assertIn("close: none", str(caught.exception))
+
+    def test_a_page_matches_only_with_enough_equal_text(self):
+        self.assertEqual(self.program.matches(0x20000, PROGRAM_TEXT + bytes(100)), 128)
+        self.assertEqual(self.program.matches(0x20000, PROGRAM_TEXT[:63]), 0)
+        self.assertEqual(self.program.matches(0x20000, PROGRAM_TEXT[:64]), 64)
+        self.assertEqual(self.program.matches(0x20000, bytes(reversed(PROGRAM_TEXT))), 0)
+        self.assertEqual(self.program.matches(0x21000, PROGRAM_TEXT), 0)  # past the text
+        self.assertEqual(self.program.matches(0x1F000, PROGRAM_TEXT), 0)  # before it
+
+    def test_a_space_is_named_by_the_best_matching_user_program(self):
+        other = trace.Program("other", [write_program(self.directory, "other", bytes(128))])
+        programs = {"kernel": self.program, "app": self.program, "other": other}
+        space = {"space": 0x7000, "text_base": 0x20000, "text_sample": PROGRAM_TEXT.hex()}
+        self.assertEqual(trace.identify(space, programs), "app")
+        self.assertEqual(trace.identify(space, {"kernel": self.program, "other": other}), "space 0x7000")
+        twin = {"app": self.program, "twin": self.program}
+        self.assertEqual(trace.identify(space, twin), "app/twin")
+
+    def test_a_written_trace_is_json_and_the_document_keeps_its_events(self):
+        events = [{"seq": 0, "ev": "enter"}, {"seq": 1, "ev": "exit"}]
+        document = {"format": 1, "run": {"typed": "x", "nested": [1, 2]}, "events": events}
+        path = self.directory / "out" / "trace.json"
+        trace.write(document, path)
+        self.assertEqual(json.loads(path.read_text(encoding="utf-8")),
+                         {"format": 1, "run": {"typed": "x", "nested": [1, 2]}, "events": events})
+        self.assertIs(document["events"], events)
+        empty = {"format": 1, "events": []}
+        trace.write(empty, path)
+        self.assertEqual(json.loads(path.read_text(encoding="utf-8")), {"format": 1, "events": []})
+
+    def test_a_summary_folds_repeated_entries(self):
+        enter = {"ev": "enter", "thread": 2, "program": "editor", "fn": "runtime.next"}
+        events = [enter, enter, {**enter, "ev": "exit"}, enter,
+                  {"ev": "irq", "thread": 2, "program": "kernel", "fn": "isr", "cause": ["syscall"],
+                   "syscall": "OS_CALL", "service": "REQUEST"},
+                  {**enter, "thread": 5}]
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            trace.summarize({"events": events})
+        self.assertEqual(out.getvalue().splitlines(), [
+            "  t2   editor   runtime.next x3",
+            "  t2   irq      IRQ syscall OS_CALL REQUEST",
+            "  t5   editor   runtime.next",
+        ])
+
+
 if __name__ == "__main__":
     unittest.main()
