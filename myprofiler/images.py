@@ -124,6 +124,8 @@ class Image:
             return False
         # The page holds more than the text; only the text is in the file as is.
         length = min(len(sample), self.text_end - self.text_start)
+        if length <= 0:
+            return False  # no text range: nothing to compare, so nothing matches
         data = self.path.read_bytes()
         at = data.find(sample[:min(length, 64)])
         return at >= 0 and data[at:at + length] == sample[:length]

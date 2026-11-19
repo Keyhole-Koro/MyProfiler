@@ -110,6 +110,14 @@ class Images(unittest.TestCase):
         self.assertFalse(image.matches(bytes(reversed(TEXT)) + bytes(100)))
         self.assertFalse(image.matches(b""))
 
+    def test_an_image_without_a_text_range_matches_nothing(self):
+        bare = write_image(self.directory, "bare", lines=False)
+        (self.directory / "bare.mbin.map").unlink()
+        self.assertFalse(Image(bare).matches(TEXT + bytes(100)))
+        empty = write_image(self.directory, "empty")
+        (self.directory / "empty.mbin.map").write_text(MAP.replace("0x20020 (32", "0x20000 (0"))
+        self.assertFalse(Image(empty).matches(TEXT + bytes(100)))
+
 
 class Profiles(unittest.TestCase):
     def setUp(self):
