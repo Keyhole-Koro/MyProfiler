@@ -191,6 +191,75 @@ class Reports(unittest.TestCase):
         self.assertEqual(result, 1)
         self.assertIn(str(gone), out)
 
+    def test_a_report_prints_every_section_it_has_data_for(self):
+        source = self.directory / "app.mln"
+        hits = [{"space": 0x7000, "pc": 0x20000, "hits": 2},
+                {"space": 0x7000, "pc": 0x20010, "hits": 6}]
+        profile = self.load(
+            source, hits,
+            threads=[{"thread": -2, "instructions": 2}, {"thread": 3, "instructions": 6}],
+            functions=[{"space": 0x7000, "entry": 0x20010, "self": 6, "inclusive": 6, "calls": 1}],
+            edges=[{"caller_space": 0x7000, "caller": 0x20000,
+                    "callee_space": 0x7000, "callee": 0x20010, "count": 1}],
+            opcode_hits=[{"mnemonic": "ADD", "count": 8}],
+            mem_reads=[{"page": 0x30000000, "count": 4}],
+            mem_writes=[{"page": 0x00021000, "count": 1}])
+        _, out = self.printed(report.report, profile, 5)
+        for title in ("Programs (total=8", "Threads", "Cost kinds", "Functions", "Source lines",
+                      "Calls", "Opcodes", "Memory reads", "Memory writes"):
+            self.assertIn(f"=== {title}", out)
+        self.assertIn("boot", out)
+        self.assertIn("thread 3", out)
+        self.assertIn("aggregate copies", out)
+        self.assertIn("main -> helper", out)
+        self.assertIn("0x30000000 VRAM", out)
+        self.assertIn(f"  {report.short_path(str(source))}:9\n", out)
+
+    def test_annotate_reads_the_matching_file_with_the_most_hits(self):
+        quiet = self.directory / "a" / "app.mln"
+        busy = self.directory / "b" / "app.mln"
+        for path in (quiet, busy):
+            path.parent.mkdir()
+            path.write_text("\n".join(f"line {n}" for n in range(1, 10)) + "\n")
+        image = write_image(self.directory, "app")
+        (self.directory / "app.mbin.lines").write_text(
+            f"file 0 {quiet}\nfile 1 {busy}\nfunc 0x00020000 0 main\n"
+            "line 0x00020000 0 3 -\nline 0x00020010 1 9 -\n")
+        hits = [{"space": 0x7000, "pc": 0x20000, "hits": 2},
+                {"space": 0x7000, "pc": 0x20010, "hits": 6}]
+        spaces = [{"space": 0x7000, "instructions": 8, "text_sample": TEXT.hex()}]
+        path = write_profile(self.directory, "p.json", hits, spaces=spaces)
+        profile = Profile(path, ImageSet([], "kernel"), [Image(image)])
+        result, out = self.printed(report.annotate, profile, "app.mln")
+        self.assertEqual(result, 0)
+        lines = out.splitlines()
+        self.assertEqual(lines[0], f"{busy} (6 instructions, 75.0% of the profile)")
+        self.assertRegex(lines[9], r"^\s+6\s+75\.0%\s+9  line 9$")
+        self.assertRegex(lines[3], r"^\s{19}\s+3  line 3$")
+
+    def test_annotate_says_when_no_source_matches(self):
+        profile = self.load(self.directory / "app.mln", [{"space": 0x7000, "pc": 0x20000, "hits": 1}])
+        result, out = self.printed(report.annotate, profile, "other.mln")
+        self.assertEqual(result, 1)
+        self.assertIn("no profiled source ends in other.mln", out)
+
+    def test_memory_regions_and_an_empty_whole(self):
+        self.assertEqual(report.memory_region(0x1FFF0000), "stack")
+        self.assertEqual(report.memory_region(0x24000FFF), "MMIO")
+        self.assertEqual(report.memory_region(0x30300000), "")
+        self.assertEqual(report.percent(1, 0), "  0.0%")
+        self.assertEqual(report.percent(1, 4), " 25.0%")
+
+    def test_a_profile_diff_marks_new_functions_and_stops_at_unchanged_ones(self):
+        source = self.directory / "app.mln"
+        before = self.load(source, [{"space": 0x7000, "pc": 0x20000, "hits": 5}])
+        after = self.load(source, [{"space": 0x7000, "pc": 0x20000, "hits": 5},
+                                   {"space": 0x7000, "pc": 0x20010, "hits": 3}])
+        _, out = self.printed(compare.compare_profiles, before, after, 10)
+        self.assertTrue(out.startswith("total:"))
+        self.assertRegex(out, r"\s0\s+3\s+\+3\s+new\s+app: helper")
+        self.assertNotIn("app: main", out)
+
 
 class Tables(unittest.TestCase):
     def test_a_slower_case_is_counted(self):
@@ -201,6 +270,22 @@ class Tables(unittest.TestCase):
             before.write_text(json.dumps({"cases": {"a": 10, "b": 10}}))
             after.write_text(json.dumps({"cases": {"a": 12, "b": 9}}))
             self.assertEqual(compare.compare_tables(before, after, 5), 1)
+
+    def test_bench_diff_fails_only_when_asked_and_a_case_is_slower(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary)
+            before = directory / "before.json"
+            slower = directory / "slower.json"
+            faster = directory / "faster.json"
+            before.write_text(json.dumps({"cases": {"a": 10}}))
+            slower.write_text(json.dumps({"cases": {"a": 11}}))
+            faster.write_text(json.dumps({"cases": {"a": 9}}))
+            with contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(cli.main(["bench-diff", str(before), str(slower)]), 0)
+                self.assertEqual(cli.main(["bench-diff", str(before), str(slower),
+                                           "--fail-on-regression"]), 1)
+                self.assertEqual(cli.main(["bench-diff", str(before), str(faster),
+                                           "--fail-on-regression"]), 0)
 
     def test_a_failed_case_leaves_the_table_alone(self):
         with tempfile.TemporaryDirectory() as temporary:
