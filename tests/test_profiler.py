@@ -238,6 +238,16 @@ class Runs(unittest.TestCase):
             cli.main(["report", "--build", str(self.build)])
         self.assertIn("make profile", str(caught.exception))
 
+    def test_a_boot_that_cannot_start_leaves_no_disk_copy(self):
+        (self.build / "disk.img").write_bytes(b"disk")
+        output = self.build / "out" / "p.json"
+        original = cli.REPO_ROOT
+        cli.REPO_ROOT = self.build  # no runtime/MyEmulator here
+        self.addCleanup(setattr, cli, "REPO_ROOT", original)
+        with self.assertRaises(FileNotFoundError):
+            cli.main(["system", str(output), "--build", str(self.build)])
+        self.assertFalse((output.parent / "p.disk.img").exists())
+
 
 class Session(unittest.TestCase):
     def test_the_thread_word_is_found_under_its_private_tag(self):
