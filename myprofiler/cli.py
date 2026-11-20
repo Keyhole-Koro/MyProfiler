@@ -41,8 +41,10 @@ def run_system(args) -> int:
     command = [str(myemu), "-i", str(args.build / "firmware_linked.mbin"), "--disk", str(disk),
                "--headless", "--timer-interval", "1000", "--step", str(args.steps),
                *session.emulator_arguments(args.build, output)]
-    result = subprocess.run(command, capture_output=True, text=True)
-    disk.unlink()
+    try:
+        result = subprocess.run(command, capture_output=True, text=True)
+    finally:
+        disk.unlink()
     if result.returncode != 0:
         print(result.stdout[-2000:], result.stderr[-2000:], file=sys.stderr)
         return result.returncode
