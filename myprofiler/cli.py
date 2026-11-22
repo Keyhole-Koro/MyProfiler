@@ -7,13 +7,15 @@ import subprocess
 import sys
 from pathlib import Path
 
-from . import bench, compare, report, runs, session, trace
+from . import bench, compare, frames, report, runs, session, trace, uibench
 from .images import Image, ImageSet
 from .profile import Profile, find_images
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 BENCH_TABLE = REPO_ROOT / "build" / "profile" / "bench.json"
 BENCH_BASELINE = REPO_ROOT / "qa" / "baselines" / "e2e-instructions.json"
+UI_TABLE = REPO_ROOT / "build" / "profile" / "ui-bench.json"
+UI_BASELINE = REPO_ROOT / "qa" / "baselines" / "ui-bench.json"
 
 
 def existing(path: Path, recorded_by: str) -> Path:
@@ -95,6 +97,20 @@ def parser() -> argparse.ArgumentParser:
     measure.add_argument("--keep", type=Path, help="keep each case's image and profile here")
     measure.add_argument("--jobs", type=int, default=os.cpu_count() or 1)
 
+    timeline = commands.add_parser("frames", help="summarize a frame timeline (myemu --timeline)")
+    timeline.add_argument("timeline", type=Path, nargs="?", default=REPO_ROOT / "build" / "timeline.json",
+                          help="default: build/timeline.json")
+    timeline.add_argument("--top", type=int, default=5, help="slowest paints to break down")
+    ui = commands.add_parser("ui-bench", help="record what the desktop's interactions cost")
+    ui.add_argument("output", type=Path, nargs="?", default=UI_TABLE,
+                    help="default: build/profile/ui-bench.json")
+    ui_diff = commands.add_parser("ui-bench-diff", help="compare two UI tables")
+    ui_diff.add_argument("before", type=Path, nargs="?", default=UI_BASELINE,
+                         help="default: qa/baselines/ui-bench.json")
+    ui_diff.add_argument("after", type=Path, nargs="?", default=UI_TABLE,
+                         help="default: build/profile/ui-bench.json")
+    ui_diff.add_argument("--fail-on-regression", action="store_true",
+                         help="exit 1 if any cost grew by more than 2%%")
     table = commands.add_parser("bench-diff", help="compare two e2e tables")
     table.add_argument("before", type=Path, nargs="?", default=BENCH_BASELINE,
                        help="default: qa/baselines/e2e-instructions.json")
@@ -125,6 +141,14 @@ def main(argv=None) -> int:
         return trace.main(args)
     elif args.command == "bench":
         return bench.record(REPO_ROOT, args.output, args.keep, args.jobs)
+    elif args.command == "ui-bench":
+        return uibench.record(REPO_ROOT, args.output)
+    elif args.command == "ui-bench-diff":
+        slower = uibench.compare(existing(args.before, "make ui-bench-save"),
+                                 existing(args.after, "make ui-bench"))
+        return 1 if slower and args.fail_on_regression else 0
+    elif args.command == "frames":
+        frames.summarize(existing(args.timeline, "make run ARGS=--timeline=build/timeline.json"), args.top)
     elif args.command == "bench-diff":
         slower = compare.compare_tables(existing(args.before, "make bench-save"),
                                         existing(args.after, "make bench"), args.top)

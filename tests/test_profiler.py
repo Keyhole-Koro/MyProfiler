@@ -11,7 +11,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from myprofiler import bench, cli, compare, report, runs, session, trace  # noqa: E402
+from myprofiler import bench, cli, compare, frames, report, runs, session, trace, uibench  # noqa: E402
 from myprofiler.bench import read_cases  # noqa: E402
 from myprofiler.images import Image, ImageSet, short_name  # noqa: E402
 from myprofiler.profile import Profile  # noqa: E402
@@ -63,6 +63,61 @@ def write_profile(directory: Path, name: str, hits: list, **fields) -> Path:
     path = directory / name
     path.write_text(json.dumps(data))
     return path
+
+
+class Timelines(unittest.TestCase):
+    """myprofiler.py frames reads the emulator's Chrome trace."""
+
+    def test_a_paint_is_split_into_its_spans_and_its_dma(self):
+        def event(tid, ph, name, ts, instrs=0, dur=None):
+            e = {"name": name, "pid": 1, "tid": tid, "ph": ph, "ts": ts, "args": {"instrs": instrs}}
+            if dur is not None:
+                e["dur"] = dur
+            return e
+        trace = {"traceEvents": [
+            {"name": "thread_name", "ph": "M", "pid": 1, "tid": 1, "args": {"name": "guest CPU"}},
+            event(1, "B", "paint", 0, 100),
+            event(1, "B", "Terminal", 1000, 150),
+            event(4, "X", "dma shadow 1280x960", 2000, dur=5000),
+            event(3, "i", "cursor", 3000),
+            event(1, "E", "Terminal", 9000, 900),
+            event(1, "E", "paint", 10000, 1100),
+            event(3, "i", "swap", 10500),
+        ]}
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "timeline.json"
+            path.write_text(json.dumps(trace))
+            out = io.StringIO()
+            with contextlib.redirect_stdout(out):
+                frames.summarize(path, top=1)
+        text = out.getvalue()
+        self.assertIn("1 paints, 1 frames shown, 1 cursor moves", text)
+        self.assertIn("10.0 ms,     1,000 instrs, 2D DMA   5.0 ms, cursor moved 1x", text)
+        self.assertIn("750 instrs  Terminal", text)
+        self.assertIn("dma shadow", text)
+
+
+class UiBench(unittest.TestCase):
+    """myprofiler.py ui-bench-diff compares two tables."""
+
+    def test_only_a_change_past_the_tolerance_counts_as_slower(self):
+        before = {"drag": {"paint_per_frame": 1000, "motion_per_event": 100},
+                  "type": {"paint_per_frame": 1000, "key_per_event": 100},
+                  "hover": {"hit_test_per_call": 100}}
+        after = json.loads(json.dumps(before))
+        after["drag"]["paint_per_frame"] = 1015   # +1.5%: noise
+        after["type"]["key_per_event"] = 110      # +10%: slower
+        after["hover"]["hit_test_per_call"] = 50  # faster
+        with tempfile.TemporaryDirectory() as directory:
+            a, b = Path(directory) / "a.json", Path(directory) / "b.json"
+            a.write_text(json.dumps(before))
+            b.write_text(json.dumps(after))
+            out = io.StringIO()
+            with contextlib.redirect_stdout(out):
+                slower = uibench.compare(a, b)
+        self.assertEqual(slower, 1)
+        self.assertIn("type.key_per_event", out.getvalue())
+        self.assertIn("faster", out.getvalue())
 
 
 class Names(unittest.TestCase):

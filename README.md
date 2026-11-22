@@ -99,6 +99,37 @@ It prints the sequence too, one line per function entered, repeats folded.
 `trace.start`, `trace.read`, `trace.write` and `trace.stop` do the logging; see
 [docs/formats.md](docs/formats.md).
 
+## The frame timeline
+
+A profile counts instructions; it cannot say why a frame took 100 ms when
+half of that was the emulator filling rectangles for the guest's 2D DMA. A
+timeline can: `myemu --timeline` records, on the wall clock, the spans the
+guest marks (MyOS: each compositor pass, its paint, each window's paint
+under its title), device interrupts, idle time, the emulator's presents and
+every sizable DMA command, and writes a Chrome trace.
+
+```bash
+make run ARGS="--timeline build/timeline.json"   # use the desktop, then close it
+python3 tools/MyProfiler/myprofiler.py frames     # summarize build/timeline.json
+```
+
+`frames` lists the slowest paints with the windows they spent their time
+on, the DMA time inside each and how often the cursor moved meanwhile, then
+the totals by guest span, DMA command and emulator activity. For the full
+picture open the file at https://ui.perfetto.dev. Over the automation bridge,
+`timeline.start` and `timeline.write {"path"}` record one interaction.
+
+## The UI benchmark
+
+`make ui-bench` boots the built system, profiles a drag, typing and the
+pointer moving across windows, and compares what they cost with
+`qa/baselines/ui-bench.json`: guest instructions per painted frame
+(`present_frame`), per pointer motion while dragging, per key, per hit test.
+Totals move with the timer; these do not, beyond about 1%, so a change over
+2% is reported as slower or faster. `make ui-bench-save` makes the current
+build the baseline. DMA work is not an instruction count; record a timeline
+for it.
+
 ## Limits
 
 - The kernel's current-thread word is found by name in its map. Without it,
