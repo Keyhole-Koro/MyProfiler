@@ -122,9 +122,13 @@ def annotate(profile: Profile, file_suffix: str) -> int:
     if file is None:
         print(f"no profiled source ends in {file_suffix}")
         return 1
+    try:
+        source = Path(file).read_text(encoding="utf-8").splitlines()
+    except OSError as error:  # moved, or profiled on another machine
+        print(f"cannot read {file}: {error.strerror or error}")
+        return 1
     print(f"{file} ({sum(counts.values())} instructions, "
           f"{percent(sum(counts.values()), profile.total).strip()} of the profile)")
-    source = Path(file).read_text(encoding="utf-8").splitlines()
     for number, text in enumerate(source, start=1):
         hits = counts.get(number)
         column = f"{hits:>12} {percent(hits, profile.total)}" if hits else " " * 19
